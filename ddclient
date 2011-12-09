@@ -403,6 +403,9 @@ my %variables = (
 	'mx'	              => setv(T_OFQDN,  0, 1, 1, '',                  undef),
 	'mxpri'               => setv(T_NUMBER, 0, 0, 1, 5,                   undef),
     },
+    'namecoin-common-defaults'       => {
+	'static'              => setv(T_BOOL,   0, 1, 1, 0,                   undef),
+    },
     'noip-common-defaults'       => {
 	'static'              => setv(T_BOOL,   0, 1, 1, 0,                   undef),
     },
@@ -563,6 +566,16 @@ my %services = (
 			  $variables{'service-common-defaults'},
 		        ),
     },
+    'namecoin' => {
+	'updateable' => \&nic_namecoin_updateable,
+	'update'     => \&nic_namecoin_update,
+	'examples'   => \&nic_namecoin_examples,
+	'variables'  => merge(
+			  $variables{'namecoin-common-defaults'},
+			  $variables{'service-common-defaults'},
+		        ),
+    },
+ 
 );
 $variables{'merged'} = merge($variables{'global-defaults'},
 			     $variables{'service-common-defaults'},
@@ -1922,6 +1935,138 @@ sub geturl {
     $reply =~ s/\r//g if defined $reply;
     return $reply;
 }
+
+######################################################################
+## posturl
+######################################################################
+sub posturl {
+    my $proxy    = shift || '';
+    my $url      = shift || '';
+    my $login    = shift || '';
+    my $password = shift || '';
+    my $postdata = shift || '';
+    my ($peer, $server, $port, $default_port, $use_ssl);
+    my ($sd, $rq, $request, $reply);
+
+    debug("proxy  = $proxy");
+    debug("url    = %s", $url);
+    ## canonify proxy and url
+    my $force_ssl;
+    $force_ssl = 1 if ($url =~ /^https:/);
+    $proxy  =~ s%^https?://%%i;
+    $url    =~ s%^https?://%%i;
+    $server = $url;
+    $server =~ s%/.*%%;
+    $url    = "/" unless $url =~ m%/%;
+    $url    =~ s%^[^/]*/%%;
+ 
+    debug("server = $server");
+    opt('fw') && debug("opt(fw = ",opt('fw'),")");
+    $globals{'fw'} && debug("glo fw = $globals{'fw'}"); 
+    #if ( $globals{'ssl'} and $server ne $globals{'fw'} ) {
+    ## always omit SSL for connections to local router
+    if ( $force_ssl || ($globals{'ssl'} and (caller(1))[3] ne 'main::get_ip') ) {
+        $use_ssl      = 1;
+        $default_port = 443;
+		load_ssl_support;
+    } else {
+        $use_ssl      = 0;
+        $default_port = 80;
+    }
+   
+    ## determine peer and port to use.
+    $peer   = $proxy || $server;
+    $peer   =~ s%/.*%%;
+    $port   = $peer;
+    $port   =~ s%^.*:%%;
+    $port   = $default_port unless $port =~ /^\d+$/;
+    $peer   =~ s%:.*$%%;
+  
+    my $to =  sprintf "%s%s", $server, $proxy ? " via proxy $peer:$port" : "";
+    verbose("CONNECT:", "%s", $to);
+
+    $request  = "POST ";
+    $request .= "http://$server" if $proxy;
+    $request .= "/$url HTTP/1.1\n";
+    $request .= "Host: $server\n";
+
+    my $auth = encode_base64("${login}:${password}");
+    $request .= "Authorization: Basic $auth\n" if $login || $password;
+    $request .= "User-Agent: ${program}/${version}\n";
+    $request .= "Connection: close\n";
+    my $contentlength = sprintf("Content-Length: %s\n", length($postdata));
+    $request .= $contentlength;
+
+    $request .= "\n";
+
+    $request .= $postdata;
+
+    ## make sure newlines are <cr><lf> for some pedantic proxy servers
+    ($rq = $request) =~ s/\n/\r\n/g;
+
+    # local $^W = 0;
+    $0 = sprintf("%s - connecting to %s port %s", $program, $peer, $port);
+    if (! opt('exec')) {
+	debug("skipped network connection");
+	verbose("SENDING:", "%s", $request);
+    } elsif ($use_ssl) {
+	    $sd = IO::Socket::SSL->new(
+            PeerAddr => $peer,
+            PeerPort => $port,
+            Proto => 'tcp',
+            MultiHomed => 1,
+            Timeout => opt('timeout'),
+        );
+	    defined $sd or warning("cannot connect to $peer:$port socket: $@ " . IO::Socket::SSL::errstr());
+    } else {
+	    $sd = IO::Socket::INET->new(
+            PeerAddr => $peer,
+            PeerPort => $port,
+            Proto => 'tcp',
+            MultiHomed => 1,
+            Timeout => opt('timeout'),
+        );
+	    defined $sd or warning("cannot connect to $peer:$port socket: $@");
+    }
+
+	if (defined $sd) {
+		## send the request to the http server
+		verbose("CONNECTED: ", $use_ssl ? 'using SSL' : 'using HTTP');
+		verbose("SENDING:", "%s", $request);
+
+		$0 = sprintf("%s - sending to %s port %s", $program, $peer, $port);
+		my $result = syswrite $sd, $rq;
+		if ($result != length($rq)) {
+			warning("cannot send to $peer:$port ($!).");
+		} else {
+			$0 = sprintf("%s - reading from %s port %s", $program, $peer, $port);
+			eval {
+				local $SIG{'ALRM'} = sub { die "timeout";};
+				alarm(opt('timeout')) if opt('timeout') > 0;
+				while ($_ = <$sd>) {
+					$0 = sprintf("%s - read from %s port %s", $program, $peer, $port);
+					verbose("RECEIVE:", "%s", define($_, "<undefined>"));
+					$reply .= $_ if defined $_;
+				}
+				if (opt('timeout') > 0) {
+					alarm(0);
+				}
+			};
+			close($sd);
+
+			if ($@ and $@ =~ /timeout/) {
+				warning("TIMEOUT: %s after %s seconds", $to, opt('timeout'));
+				$reply = '';
+			}
+			$reply = '' if !defined $reply;
+		}
+	}
+	$0 = sprintf("%s - closed %s port %s", $program, $peer, $port);
+
+    $reply =~ s/\r//g if defined $reply;
+    return $reply;
+}
+
 ######################################################################
 ## get_ip
 ######################################################################
@@ -3671,6 +3816,81 @@ sub nic_dtdns_update {
     }
 }
 
+######################################################################
+## nic_namecoin_examples
+######################################################################
+sub nic_namecoin_examples {
+    return <<EoEXAMPLE;
+o 'namecoin'
+
+The 'namecoin' protocol is the protocol used by namecoin 
+
+Configuration variables applicable to the 'namecoin' protocol are:
+  protocol=namecoin            ## 
+  server=127.0.0.1:8336        ## defaults to 127.0.0.1:8336
+  login=namecoin-login         ## login name and password registered with namecoin
+  password=namecoin-password   ##
+  fully.qualified.host.bit     ## the host registered with the service.
+
+Example ${program}.conf file entries:
+  ## single host update
+  protocol=namecoin,                                        \\
+  login=namecoin-login                                      \\
+  password=namecoin-password                                 \\
+  myhost.bit 
+EoEXAMPLE
+}
+
+######################################################################
+## nic_namecoin_updateable
+######################################################################
+sub nic_namecoin_updateable {
+    my $host   = shift;
+    my $update = 0;
+
+    if ($config{$host}{'static'} ne $cache{$host}{'static'}) {
+
+	info("forcing updating %s because 'static' has changed to %s.", $host, ynu($config{$host}{'static'},"YES","NO","NO"));
+	$update = 1;
+
+    }
+    return $update;
+}
+
+
+
+######################################################################
+## nic_namecoin_update
+######################################################################
+sub nic_namecoin_update {
+
+    debug("\nnic_namecoin_update -------------------");
+
+    ## update each configured host
+    foreach my $h (@_) {
+	my $ip = delete $config{$h}{'wantip'};
+        info("setting IP address to %s for %s", $ip, $h);
+        verbose("UPDATE:","updating %s", $h);
+
+        my $url;
+        $url   = "$config{$h}{'server'}";
+
+        my $dhost = $h;
+        $dhost  =~ s/\.bit$//i;
+        $dhost  = "d/$dhost";
+        my $postdata = "{\"method\":\"name_update\",\"params\":[\"$dhost\",\"{\\\"map\\\":{\\\"\\\":\\\"$ip\\\"}}\"],\"id\":1}";
+
+        my $reply = posturl(opt('proxy'), $url, opt('login'), opt('password'), $postdata);
+        if (!defined($reply) || !$reply) {
+            failed("updating %s: Could not connect to %s.", $h, $config{$h}{'server'});
+            last;
+        }
+        last if !header_ok($h, $reply);
+
+    }
+}
+
+#########
 ######################################################################
 # vim: ai ts=4 sw=4 tw=78 :
 

@@ -1,3 +1,27 @@
+This is a fork of [ddclient](http://sourceforge.net/apps/trac/ddclient).
+This fork adds namecoin support to ddclient.
+
+[Namecoin](http://www.bitcoin.org/smf/index.php?topic=6017) is a P2P domain name system. 
+[DDclient](http://sourceforge.net/apps/trac/ddclient) is a client used to update dynamic domain name entries.
+
+Installation:
+    $ git clone https://github.com/hugoxyz/namecoin-ddclient
+    $ cd namecoin-ddclient
+    $ cp ddclient /usr/sbin/
+    $ mkdir /etc/ddclient
+    $ mkdir /var/cache/ddclient
+    $ cp sample-etc_ddclient_namecoin.conf /etc/ddclient/ddclient.conf
+    $ vi /etc/ddclient/ddclient.conf
+    -- and change hostnames, logins, and passwords appropriately
+
+    ## For those using Redhat style rc files and using daemon-mode:
+    $ cp sample-etc_rc.d_init.d_ddclient /etc/rc.d/init.d/ddclient
+    ## On Ubuntu:
+    $ cp sample-etc_rc.d_init.d_ddclient /etc/init.d/ddclient
+    ## start the first time by hand
+    $ /etc/rc.d/init.d/ddclient start
+
+Original README:
 ===============================================================================
 DDCLIENT v3.6.7
 
