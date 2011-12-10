@@ -1,11 +1,11 @@
-This is a fork of [ddclient](http://sourceforge.net/apps/trac/ddclient).
+This is a fork of ddclient(http://sourceforge.net/apps/trac/ddclient).
 This fork adds namecoin support to ddclient.
 
-[Namecoin](http://www.bitcoin.org/smf/index.php?topic=6017) is a P2P domain name system. 
-[DDclient](http://sourceforge.net/apps/trac/ddclient) is a client used to update dynamic domain name entries.
+Namecoin(https://github.com/vinced/namecoin) is a P2P domain name system. 
+DDclient(http://sourceforge.net/apps/trac/ddclient) is a client used to update dynamic domain name entries.
 
 Installation:
-    $ git clone https://github.com/hugoxyz/namecoin-ddclient
+    $ git clone https://github.com/hugohp/namecoin-ddclient
     $ cd namecoin-ddclient
     $ cp ddclient /usr/sbin/
     $ mkdir /etc/ddclient
